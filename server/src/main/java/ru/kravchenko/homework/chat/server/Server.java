@@ -3,6 +3,7 @@ package ru.kravchenko.homework.chat.server;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,22 +18,43 @@ public class Server {
 
     public void start() {
         try (ServerSocket serverSocket = new ServerSocket(port)) {
+            DBAuthService.connect();
             System.out.printf("Сервер запущен на порту: %d, ожидаем клиентов\n", port);
             while (true) {
-                Socket socket = serverSocket.accept();
-                subscribe(new ClientHandler(this, socket));
+                try {
+                    Socket socket = serverSocket.accept();
+                    new ClientHandler(this, socket);
+
+                } catch (Exception e) {
+                    System.out.println("Ошибка при обработке подключившегося клиента");
+                }
             }
-        } catch (IOException e) {
+        } catch (IOException | SQLException e) {
             e.printStackTrace();
         }
     }
 
     public synchronized void subscribe(ClientHandler clientHandler) {
+        broadcastMessage("К чату присоеденился " + clientHandler.getNickname());
+        clientHandler.setActive(true);
         clients.add(clientHandler);
     }
 
     public synchronized void unsubscribe(ClientHandler clientHandler) {
         clients.remove(clientHandler);
+        if (clientHandler.getActive()) {
+            broadcastMessage(clientHandler.getNickname() + " покинул чат");
+            clientHandler.setActive(false);
+        }
+    }
+
+    public synchronized ClientHandler getClientHandlerByNickname(String nickname) {
+        for (ClientHandler client : clients) {
+            if (client.getNickname().equals(nickname)) {
+                return client;
+            }
+        }
+        return null;
     }
 
     public synchronized void broadcastMessage(String message) {
@@ -43,9 +65,18 @@ public class Server {
 
     public synchronized void sendPrivateMessage(String recipient, String message) {
         for (ClientHandler c : clients) {
-            if (c.getUsername().equals(recipient)) {
+            if (c.getNickname().equals(recipient)) {
                 c.sendMessage(message);
             }
         }
+    }
+
+    public synchronized boolean isNicknameBusy(String nickname) {
+        for (ClientHandler c : clients) {
+            if (c.getNickname().equals(nickname)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
