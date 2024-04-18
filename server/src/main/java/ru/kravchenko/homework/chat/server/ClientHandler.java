@@ -4,6 +4,9 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class ClientHandler {
     private Server server;
@@ -34,9 +37,8 @@ public class ClientHandler {
             try {
                 if (tryToAuth()) {
                     communicate();
-
                 }
-            } catch (IOException e) {
+            } catch (IOException | SQLException e) {
                 e.printStackTrace();
             } finally {
                 disconnect();
@@ -44,19 +46,19 @@ public class ClientHandler {
         }).start();
     }
 
-    private boolean tryToAuth() throws IOException {
+    private boolean tryToAuth() throws IOException, SQLException {
         while (true) {
             // /auth login pass
             String msg = in.readUTF();
             if (msg.startsWith("/auth ")) {
                 String[] tokens = msg.split(" ");
                 if (tokens.length != 3) {
-                    System.out.println("Некорректный формат запроса");
+                    sendMessage("Некорректный формат запроса");
                     continue;
                 }
-                String login = tokens[1];
+                String email = tokens[1];
                 String password = tokens[2];
-                String nickname = server.getAuthService().getUsernameByLoginAndPassword(login, password);
+                String nickname = DBAuthService.getNicknameByEmailAndPassword(email, password);
                 if (nickname == null) {
                     sendMessage("Некорректный логин или пароль");
                     continue;
@@ -75,21 +77,18 @@ public class ClientHandler {
                     sendMessage("Некорректный формат запроса");
                     continue;
                 }
-                String login = tokens[1];
-                String password = tokens[2];
-                String nickname = tokens[3];
-                if (server.getAuthService().isLoginAlreadyExists(login)) {
-                    sendMessage("Указанный логин уже занят");
+                String nickname = tokens[1];
+                String email = tokens[2];
+                String password = tokens[3];
+                if (DBAuthService.isEmailExists(email)) {
+                    sendMessage("Указанный email уже занят");
                     continue;
                 }
-                if (server.getAuthService().isNicknameExists(nickname)) {
+                if (DBAuthService.isNicknameExists(nickname)) {
                     sendMessage("Указанный никнейм уже занят");
                     continue;
                 }
-                if (!server.getAuthService().register(login, password, nickname)) {
-                    sendMessage("Не удалось пройти регистрацию");
-                    continue;
-                }
+                DBAuthService.register(nickname, email, password);
                 this.nickname = nickname;
                 server.subscribe(this);
                 sendMessage("Вы спешно зарегистрировались, добро пожаловать на чат-сервер " + nickname);
@@ -102,13 +101,12 @@ public class ClientHandler {
         }
     }
 
-    private void communicate() throws IOException {
+    private void communicate() throws IOException, SQLException {
         while (true) {
             String msg = in.readUTF();
             if (this.active) {
                 if (msg.startsWith("/")) {
                     if (msg.startsWith("/exit")) {
-                        // disconnect();
                         break;
                     }
                     if (msg.startsWith("/w ")) {
@@ -118,7 +116,7 @@ public class ClientHandler {
                         server.sendPrivateMessage(recipient, nickname + ": " + message);
                     }
                     if (msg.startsWith("/kick ")) {
-                        if (server.getAuthService().isAdminUser(this.nickname)) {
+                        if (DBAuthService.isAdmin(this.nickname)) {
                             String[] tokens = msg.split(" ", 3);
                             String recipient = tokens[1];
                             String message;
@@ -126,7 +124,7 @@ public class ClientHandler {
                                 sendMessage("Нельзя выгнать самого себя");
                                 continue;
                             }
-                            if (!server.getAuthService().isNicknameExists(recipient)) {
+                            if (!DBAuthService.isNicknameExists(recipient)) {
                                 sendMessage("Нет пользователя с ником: " + recipient);
                                 continue;
                             }
@@ -135,22 +133,19 @@ public class ClientHandler {
                             } else {
                                 message = "без пояснения причин";
                             }
-                            if (server.getAuthService().kick(recipient)) {
-                                sendMessage("Пользователь " + recipient + " выгнан из чата");
-                                server.sendPrivateMessage(recipient, "Пользователь " + this.nickname + " выгнал вас из чата " + message);
-                                server.unsubscribe(server.getClientHandlerByNickname(recipient));
-                            }
-
+                            sendMessage("Пользователь " + recipient + " выгнан из чата");
+                            server.sendPrivateMessage(recipient, "Пользователь " + this.nickname + " выгнал вас из чата " + message);
+                            server.unsubscribe(server.getClientHandlerByNickname(recipient));
                         } else {
                             sendMessage("Для использования данной команды нужны права администратора");
                         }
                     }
                     if (msg.startsWith("/grant ")) {
-                        if (server.getAuthService().isAdminUser(this.nickname)) {
+                        if (DBAuthService.isAdmin(this.nickname)) {
                             String[] tokens = msg.split(" ", 3);
                             String recipient = tokens[1];
                             String role = tokens[2].toLowerCase();
-                            if (!server.getAuthService().isNicknameExists(recipient)) {
+                            if (!DBAuthService.isNicknameExists(recipient)) {
                                 sendMessage("Нет пользователя с ником: " + recipient);
                                 continue;
                             }
@@ -159,14 +154,22 @@ public class ClientHandler {
                                     sendMessage("У вас уже имеется данная роль");
                                     continue;
                                 }
-                                server.getAuthService().grantAdmin(recipient);
+                                if(DBAuthService.isAdmin(recipient)){
+                                    sendMessage("У пользователя " + recipient + " уже имеется роль ADMIN");
+                                    continue;
+                                }
+                                DBAuthService.grantAdmin(recipient);
 
                             } else if (role.equals("user")) {
                                 if (recipient.equals(this.nickname)) {
                                     sendMessage("Нельзя понизить роль у самого себя");
                                     continue;
                                 }
-                                server.getAuthService().grantUser(recipient);
+                                if(DBAuthService.isUser(recipient)){
+                                    sendMessage("У пользователя " + recipient + " уже имеется роль USER");
+                                    continue;
+                                }
+                                DBAuthService.grantUser(recipient);
                             } else {
                                 sendMessage("Роль: " + role + " не заведена в системе");
                                 continue;

@@ -1,6 +1,5 @@
 package ru.kravchenko.homework.chat.server;
 
-import java.util.Arrays;
 
 public class ServerApp {
     public static void main(String[] args) {

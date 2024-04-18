@@ -3,17 +3,13 @@ package ru.kravchenko.homework.chat.server;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
 public class Server {
     private int port;
     private List<ClientHandler> clients;
-    private AuthService authService;
-
-    public AuthService getAuthService() {
-        return authService;
-    }
 
     public Server(int port) {
         this.port = port;
@@ -22,8 +18,7 @@ public class Server {
 
     public void start() {
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            this.authService = new InMemoryAuthService();
-            System.out.println("Cервис аутентификации запущен: " + authService.getClass().getSimpleName());
+            DBAuthService.connect();
             System.out.printf("Сервер запущен на порту: %d, ожидаем клиентов\n", port);
             while (true) {
                 try {
@@ -34,7 +29,7 @@ public class Server {
                     System.out.println("Ошибка при обработке подключившегося клиента");
                 }
             }
-        } catch (IOException e) {
+        } catch (IOException | SQLException e) {
             e.printStackTrace();
         }
     }
